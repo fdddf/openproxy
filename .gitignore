@@ -1,0 +1,24 @@
+__debug*
+deploy_k8s.yaml
+node_modules/
+ui/public/!.gitkeep
+src/gptproxy
+src/gptproxy.db
+src/.cache
+ui/dist
+bin/
+
+# Local configuration files with sensitive data
+src/config.yaml
+*.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

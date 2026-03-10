@@ -1,0 +1,46 @@
+# setting
+@host = 127.0.0.1:8081
+@token = Bearer your-api-key-here
+
+
+#### test model list
+GET http://{{host}}/v1/models
+Content-Type: application/json
+Authorization: {{token}}
+
+
+####
+POST http://{{host}}/v1/chat/completions?stream=true
+Content-Type: application/json
+Accept: text/event-stream
+Authorization: {{token}}
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [{"role": "user", "content": "Hello!"}],
+  "stream": true
+}
+
+####
+POST http://{{host}}/v1/chat/completions?stream=true
+Content-Type: application/json
+Authorization: {{token}}
+
+{
+  "model": "gpt-4",
+  "messages": [{"role": "user", "content": "What is the weather today?"}],
+  "stream": true
+}
+
+
+
+### test custom provider
+POST http://{{host}}/v1/chat/completions?stream=true&provider=openai
+Content-Type: application/json
+Authorization: {{token}}
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [{"role": "user", "content": "Tell me a joke"}],
+  "stream": true
+}
