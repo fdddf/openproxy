@@ -2,13 +2,15 @@
 
 ## Project Structure & Module Organization
 - Backend Go service lives in `src/`, with entrypoint `src/main.go` wired through `internal/controllers` (HTTP routes) and `internal/services` (config, DB, provider logic). Shared helpers are under `common/`, constants in `consts/`, and provider adapters in `providers/`.
-- Configuration sample is `src/config.yaml`; runtime config is loaded before the server starts.
+- Configuration sample is `src/config.example.yaml`; every value has a default, so the server also starts with no config file at all.
 - Frontend admin app sits in `ui/` (Vite + Vue 3 + TypeScript). Static assets are under `ui/public/`.
+- The binary is self-contained: `migrations/` (per-dialect), `statics/`, and the built UI (`internal/web/dist`, written by `make ui`) are all `go:embed`ed. Do not add runtime reads of files relative to the working directory.
+- SQLite is the default database; Postgres stays supported. Schema changes need a migration in **both** `src/migrations/sqlite/` and `src/migrations/postgres/` — `make sql NAME=...` scaffolds both.
 - Deployment assets: `Dockerfile` for container builds, `build.sh` for building/pushing and rendering `deploy_k8s.yaml`, and `deploy_k8s.yaml` for Kubernetes.
 
 ## Build, Test, and Development Commands
-- Backend local run: `cd src && go run .` (uses the module in `src/go.mod` and `config.yaml`).
-- Backend build: `cd src && go build -o ../bin/gptproxy .` to produce a binary in `bin/`.
+- Backend local run: `cd src && go run .` (SQLite in the working directory; no config needed).
+- Backend build: `cd src && make build`; `make all-in-one` builds the UI first so the binary embeds it.
 - Backend sanity checks: `cd src && go vet ./...` to catch common issues.
 - Backend tests (add `_test.go` first): `cd src && go test ./...`.
 - Frontend dev: `cd ui && npm install && npm run dev` for hot-reload.

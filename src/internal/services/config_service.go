@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -32,18 +33,24 @@ func (c *ConfigServiceImpl) LoadConfig(configPath string) error {
 		configPath = "config.yaml"
 	}
 
-	log.Printf("using config file: %s\n", configPath)
 	yamlFile, err := os.ReadFile(configPath)
-	if err != nil {
+	switch {
+	case err == nil:
+		log.Printf("using config file: %s", configPath)
+		if err := yaml.Unmarshal(yamlFile, c.config); err != nil {
+			return fmt.Errorf("parse yaml file failed: %v", err)
+		}
+	case errors.Is(err, os.ErrNotExist):
+		// A missing config file is not an error: the defaults are enough to run
+		// a self-contained SQLite instance.
+		log.Printf("no config file at %s, using defaults", configPath)
+	default:
 		return fmt.Errorf("read file failed: %v", err)
-	}
-
-	if err := yaml.Unmarshal(yamlFile, c.config); err != nil {
-		return fmt.Errorf("parse yaml file failed: %v", err)
 	}
 
 	// Load configuration from environment variables, overriding values from file
 	c.config.LoadFromEnv()
+	c.config.ApplyDefaults()
 
 	// Keep the shared config in sync for places that rely on common.Cfg directly
 	common.Cfg = *c.config

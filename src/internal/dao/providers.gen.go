@@ -59,27 +59,27 @@ func newProvider(db *gorm.DB, opts ...gen.DOOption) provider {
 type provider struct {
 	providerDo
 
-	ALL          field.Asterisk
-	ID           field.Uint
-	CreatedAt    field.Time
-	UpdatedAt    field.Time
-	DeletedAt    field.Field
-	Name         field.String
-	Platform     field.String
-	ApiKey       field.String
-	BaseURL      field.String
-	ProxyURL     field.String
-	IsActive     field.Bool
-	ClientID     field.String
-	ClientSecret field.String
-	AccessToken  field.String
-	RefreshToken field.String
-	TokenExpiry  field.Time
-	AuthURL      field.String
-	TokenURL     field.String
-	RedirectURL  field.String
-	Scopes_      field.String
-	AccountID    field.String
+	ALL                field.Asterisk
+	ID                 field.Uint
+	CreatedAt          field.Time
+	UpdatedAt          field.Time
+	DeletedAt          field.Field
+	Name               field.String
+	Platform           field.String
+	ApiKey             field.String
+	BaseURL            field.String
+	ProxyURL           field.String
+	IsActive           field.Bool
+	ClientID           field.String
+	ClientSecret       field.String
+	AccessToken        field.String
+	RefreshToken       field.String
+	TokenExpiry        field.Time
+	AuthURL            field.String
+	TokenURL           field.String
+	RedirectURL        field.String
+	Scopes_            field.String
+	AccountID          field.String
 	HealthCheckEnabled field.Bool
 	HealthCheckStatus  field.String
 	HealthCheckChecked field.Time
@@ -119,6 +119,9 @@ func (p *provider) updateTableName(table string) *provider {
 	p.RedirectURL = field.NewString(table, "redirect_url")
 	p.Scopes_ = field.NewString(table, "scopes")
 	p.AccountID = field.NewString(table, "account_id")
+	p.HealthCheckEnabled = field.NewBool(table, "health_check_enabled")
+	p.HealthCheckStatus = field.NewString(table, "health_check_status")
+	p.HealthCheckChecked = field.NewTime(table, "health_check_checked")
 
 	p.fillFieldMap()
 

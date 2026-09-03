@@ -8,6 +8,10 @@ src/.cache
 ui/dist
 bin/
 
+# Vite output embedded into the Go binary; only .gitkeep is tracked.
+src/internal/web/dist/*
+!src/internal/web/dist/.gitkeep
+
 # Local configuration files with sensitive data
 src/config.yaml
 *.env

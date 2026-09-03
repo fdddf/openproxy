@@ -1,10 +1,12 @@
 # ---------- Frontend Build Stage ----------
 FROM node:20-alpine AS ui-builder
-WORKDIR /ui
-COPY ui/package*.json ./
-RUN npm ci
-COPY ui .
-RUN npm run build
+WORKDIR /build
+COPY ui/package*.json ./ui/
+RUN cd ui && npm ci
+COPY ui ./ui
+# Vite writes into src/internal/web/dist, which the Go build embeds.
+COPY src/internal/web/dist/.gitkeep ./src/internal/web/dist/.gitkeep
+RUN cd ui && npm run build
 
 # ---------- Backend Build Stage ----------
 FROM golang:1.25-alpine AS go-builder
@@ -19,13 +21,15 @@ ENV GOPROXY=https://goproxy.cn,direct
 # Install dependencies
 RUN apk add --no-cache ca-certificates
 
-# Copy source code
+# Copy source code, then overlay the built UI so go:embed picks it up
 COPY src/ .
+COPY --from=ui-builder /build/src/internal/web/dist ./internal/web/dist
 
 # Tidy dependencies
 RUN go mod tidy
 
-# Build binary
+# Build binary. Migrations, static assets, and the admin UI are all embedded,
+# so the result is a single self-contained file.
 RUN set -eux; \
   COMMIT="${BUILD_COMMIT:-dev}"; \
   DATE="${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"; \
@@ -39,18 +43,16 @@ WORKDIR /app
 # Install runtime dependencies
 RUN apk add --no-cache ca-certificates
 
-# Copy executable and frontend assets
 COPY --from=go-builder /app/openproxy .
-COPY --from=go-builder /app/migrations ./migrations
-COPY --from=go-builder /app/statics ./statics
-COPY --from=ui-builder /ui/dist ./ui
-
-# Grant execute permission
 RUN chmod +x /app/openproxy
+
+# SQLite database location. Mount a volume here to persist it.
+ENV DB_PATH=/data/openproxy.db
+VOLUME /data
 
 EXPOSE 8081
 
-# Start service
-# Environment variables can be passed at runtime:
-# JWT_SIGN_KEY, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+# Runs against SQLite with no configuration at all. To use Postgres instead,
+# set DB_DRIVER=postgres plus DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME.
+# JWT_SIGN_KEY is generated and persisted on first start when unset.
 CMD ["/app/openproxy"]

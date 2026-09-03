@@ -24,5 +24,7 @@ var Module = fx.Options(
 		NewSettingsService,
 		NewSecretService,
 		NewRateLimitService,
+		NewRequestLogger,
+		NewSetupService,
 	),
 )

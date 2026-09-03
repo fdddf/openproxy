@@ -22,14 +22,16 @@ type ChatServiceImpl struct {
 	configService   ConfigService
 	providerService ProviderService
 	dbService       DatabaseService
+	requestLogger   RequestLogger
 }
 
 // NewChatService creates a new ChatService instance
-func NewChatService(configService ConfigService, providerService ProviderService, dbService DatabaseService) ChatService {
+func NewChatService(configService ConfigService, providerService ProviderService, dbService DatabaseService, requestLogger RequestLogger) ChatService {
 	return &ChatServiceImpl{
 		configService:   configService,
 		providerService: providerService,
 		dbService:       dbService,
+		requestLogger:   requestLogger,
 	}
 }
 
@@ -72,12 +74,7 @@ func (c *ChatServiceImpl) HandleChatCompletion(ctx *fiber.Ctx) error {
 		log.Errorf("create http request failed: %s", err)
 		return common.HandleError(ctx, fiber.StatusInternalServerError, fmt.Sprintf("create http request failed: %s", err))
 	}
-	ctx.Request().Header.Del("X-Forwarded-For")
-	ctx.Request().Header.Del("X-Real-IP")
-	ctx.Request().Header.Del("Client-IP")
-	ctx.Request().Header.VisitAll(func(key, value []byte) {
-		httpReq.Header.Set(string(key), string(value))
-	})
+	copyForwardableHeaders(ctx, httpReq)
 
 	resp, err := provider.SendRequest(httpReq)
 	if err != nil {
@@ -139,9 +136,9 @@ func (c *ChatServiceImpl) HandleModels(ctx *fiber.Ctx) error {
 func (c *ChatServiceImpl) FindProvider(ctx *fiber.Ctx, model string) (common.AIProvider, *modelMapping, error) {
 	providerName := ctx.Query("provider", c.configService.GetConfig().Proxy.DefaultProvider)
 
-	// get user_id from fiber ctx.Locals
-	userId, ok := ctx.Locals("user_id").(uint)
-	if !ok {
+	// The proxy-key middleware stores the resolved caller; its absence means the
+	// request reached here without a valid API key.
+	if _, ok := ctx.Locals("user_id").(uint); !ok {
 		return nil, nil, fmt.Errorf("API key invalid")
 	}
 
@@ -153,7 +150,7 @@ func (c *ChatServiceImpl) FindProvider(ctx *fiber.Ctx, model string) (common.AIP
 		}
 	}
 
-	mapping, err := c.getModelMapping(userId, providerName, model)
+	mapping, err := c.getModelMapping(providerName, model)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil, fmt.Errorf("no provider found or provider is disabled")
@@ -224,7 +221,7 @@ func (c *ChatServiceImpl) loadModelMappings() ([]modelMapping, error) {
 	return mappings, nil
 }
 
-func (c *ChatServiceImpl) getModelMapping(userId uint, providerName, modelName string) (*modelMapping, error) {
+func (c *ChatServiceImpl) getModelMapping(providerName, modelName string) (*modelMapping, error) {
 	// Use provider name to uniquely identify providers instead of platform
 	// This fixes the issue where multiple providers with the same platform were not being found correctly
 
@@ -263,8 +260,6 @@ func (c *ChatServiceImpl) getModelMapping(userId uint, providerName, modelName s
 }
 
 func (c *ChatServiceImpl) recordRequestLog(ctx *fiber.Ctx, reqBody []byte, respBody []byte, respHeaders http.Header, statusCode int, providerID, modelID *uint, responseTime int, model string) {
-	dao := c.dbService.GetDAO()
-
 	requestHeaders := ctx.GetReqHeaders()
 	if requestHeaders == nil {
 		requestHeaders = map[string][]string{}
@@ -338,13 +333,35 @@ func (c *ChatServiceImpl) recordRequestLog(ctx *fiber.Ctx, reqBody []byte, respB
 		CompletionTokens: completionTokens,
 		TotalTokens:      totalTokens,
 		Cost:             cost,
-		APIKeyID:         c.lookupAPIKeyID(ctx.Get("Authorization")),
+		UserID:           localsUint(ctx, "user_id"),
+		APIKeyID:         localsUint(ctx, "api_key_id"),
 		ProviderID:       providerID,
 		ModelID:          modelID,
 	}
 
-	if err := dao.Request.Create(reqLog); err != nil {
-		log.Errorf("record request log failed: %v", err)
+	c.requestLogger.Record(reqLog)
+}
+
+// forwardableHeaders is the allowlist of client headers proxied upstream. The
+// client's own Authorization is deliberately absent: providers set their own,
+// and forwarding it would leak this proxy's API key to third parties. Hop-by-hop
+// and transport headers are left to net/http.
+var forwardableHeaders = map[string]bool{
+	"Content-Type": true,
+	"Accept":       true,
+	"User-Agent":   true,
+	"OpenAI-Beta":  true,
+}
+
+func copyForwardableHeaders(ctx *fiber.Ctx, httpReq *http.Request) {
+	ctx.Request().Header.VisitAll(func(key, value []byte) {
+		name := http.CanonicalHeaderKey(string(key))
+		if forwardableHeaders[name] {
+			httpReq.Header.Set(name, string(value))
+		}
+	})
+	if httpReq.Header.Get("Content-Type") == "" {
+		httpReq.Header.Set("Content-Type", "application/json")
 	}
 }
 
@@ -440,27 +457,11 @@ func getHeader(headers map[string][]string, key string) string {
 	return ""
 }
 
-func (c *ChatServiceImpl) lookupAPIKeyID(authHeader string) *uint {
-	if authHeader == "" {
+// localsUint reads an ID the auth middleware stored on the request context.
+func localsUint(ctx *fiber.Ctx, key string) *uint {
+	value, ok := ctx.Locals(key).(uint)
+	if !ok {
 		return nil
 	}
-
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == authHeader {
-		return nil
-	}
-
-	dao := c.dbService.GetDAO()
-	apiKey, err := dao.APIKey.Where(
-		dao.APIKey.DeletedAt.IsNull(),
-		dao.APIKey.Key.Eq(token),
-	).First()
-	if err != nil {
-		if err != gorm.ErrRecordNotFound {
-			log.Errorf("find api key failed: %v", err)
-		}
-		return nil
-	}
-
-	return &apiKey.ID
+	return &value
 }

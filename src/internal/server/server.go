@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -9,9 +10,11 @@ import (
 	"github.com/fdddf/openproxy/common"
 	"github.com/fdddf/openproxy/internal/controllers"
 	"github.com/fdddf/openproxy/internal/services"
+	"github.com/fdddf/openproxy/internal/web"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"go.uber.org/fx"
 )
@@ -27,6 +30,8 @@ type serverParams struct {
 	SettingsService  services.SettingsService
 	RateLimitService services.RateLimitService
 	HealthCheck      services.HealthCheckService
+	RequestLogger    services.RequestLogger
+	SetupService     services.SetupService
 	ConfigPath       string `name:"configPath" optional:"true"`
 }
 
@@ -50,14 +55,31 @@ func StartServer(p serverParams) {
 	app.Use(cors.New())
 	// app.Use(middleware.SecurityMiddleware())
 
-	authMiddleware := controllers.NewAuthMiddleware(p.ConfigService.GetConfig().Proxy.JWTSignKey)
+	// Resolve the signing key before any route is wired: an unset key would
+	// otherwise sign and accept tokens with an empty secret.
+	signingKey, err := p.SetupService.EnsureJWTSignKey()
+	if err != nil {
+		log.Fatalf("Failed to resolve JWT signing key: %v", err)
+	}
+	if needsSetup, err := p.SetupService.NeedsSetup(); err == nil && needsSetup {
+		log.Info("No administrator exists yet; open the UI to run first-time setup")
+	}
+
+	authMiddleware := controllers.NewAuthMiddleware(signingKey)
+	adminMiddleware := controllers.NewAdminMiddleware(p.DatabaseService)
 	proxyKeyMiddleware := newProxyKeyMiddleware(p.SecretService, p.RateLimitService)
 
-	controllers.RegisterRoutes(app, p.Controller, authMiddleware)
+	controllers.RegisterRoutes(app, p.Controller, authMiddleware, adminMiddleware)
 
-	app.Static("/", "./ui", fiber.Static{
-		Index: "index.html",
-	})
+	uiAvailable := web.Available()
+	if uiAvailable {
+		app.Use("/", filesystem.New(filesystem.Config{
+			Root:  http.FS(web.Assets()),
+			Index: "index.html",
+		}))
+	} else {
+		log.Warn("admin UI is not embedded in this binary; build it with `make ui`")
+	}
 
 	settingsMiddleware := newSettingsMiddleware(p.SettingsService)
 
@@ -66,17 +88,31 @@ func StartServer(p serverParams) {
 	v1.Post("/responses", p.ChatService.HandleResponses)
 	v1.Get("/models", p.ChatService.HandleModels)
 
+	// SPA fallback: anything that is not an API route and did not match a built
+	// asset renders the Vue entrypoint so client-side routing works on reload.
 	app.Use(func(c *fiber.Ctx) error {
 		path := c.Path()
 		if strings.HasPrefix(path, "/api/") || path == "/api" || strings.HasPrefix(path, "/v1/") || path == "/v1" {
 			return c.Next()
 		}
-		return c.SendFile("./ui/index.html")
+		if !uiAvailable {
+			return c.Status(fiber.StatusNotFound).
+				Type("txt").
+				SendString("admin UI is not embedded in this binary; build it with `make ui`")
+		}
+		index, err := web.Index()
+		if err != nil {
+			return common.HandleError(c, fiber.StatusInternalServerError, "Failed to load UI")
+		}
+		// The static middleware sets 404 before falling through, so the status
+		// has to be reset for the SPA entrypoint to load normally.
+		return c.Status(fiber.StatusOK).Type("html").Send(index)
 	})
 
 	config := p.ConfigService.GetConfig()
 	p.Lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
+			p.RequestLogger.Start()
 			if p.HealthCheck != nil {
 				p.HealthCheck.Start()
 			}
@@ -87,7 +123,14 @@ func StartServer(p serverParams) {
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
-			return app.Shutdown()
+			if err := app.Shutdown(); err != nil {
+				return err
+			}
+			if p.HealthCheck != nil {
+				p.HealthCheck.Stop()
+			}
+			// Flush queued request logs before the process exits.
+			return p.RequestLogger.Stop(ctx)
 		},
 	})
 }
