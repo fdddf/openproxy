@@ -40,9 +40,17 @@ func (m *ModelServiceImpl) HandleGetModels(c *fiber.Ctx) error {
 		return common.HandleError(c, fiber.StatusInternalServerError, "Failed to get models")
 	}
 
+	ids := make([]uint, 0, len(modelsList))
+	for _, model := range modelsList {
+		ids = append(ids, model.ID)
+	}
+	counts := usageCounts(dao, dao.Request.ModelID, ids)
+
 	resp := make([]dto.Model, 0, len(modelsList))
 	for _, model := range modelsList {
-		resp = append(resp, dto.NewModel(model))
+		item := dto.NewModel(model)
+		item.UsageCount = counts[model.ID]
+		resp = append(resp, item)
 	}
 
 	return c.JSON(common.NewPaginatedResponse(resp, total, page, pageSize))

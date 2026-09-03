@@ -14,12 +14,21 @@ ENUM_SOURCES := $(filter-out %_enum.go,$(wildcard consts/*.go))
 all: build
 
 .PHONY: build
-build: ## Build the Go application binary into ../bin
+build: ## Build the Go application binary into ../bin (embeds whatever UI is present)
 	@mkdir -p $(BIN_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) .
 
+.PHONY: ui
+ui: ## Build the admin UI into internal/web/dist for embedding
+	@rm -rf internal/web/dist/assets
+	cd ../ui && npm install && npm run build
+
+.PHONY: all-in-one
+all-in-one: ui build ## Build the UI and then a fully self-contained binary
+	@echo "Built $(BIN_DIR)/$(APP_NAME) — run it anywhere, it creates ./openproxy.db on first start"
+
 .PHONY: migrate
-migrate: ## Run database migrations
+migrate: ## Run database migrations (embedded; SQLite by default)
 	@echo "Running database migrations..."
 # 	GRANT ALL PRIVILEGES ON DATABASE gptproxy TO gptproxy;
 # 	\c gptproxy;
@@ -44,9 +53,10 @@ enum: ## Run go-enum across consts/*.go (excluding generated files)
 	fi
 
 .PHONY: sql
-sql: ## Generate SQL
+sql: ## Scaffold a migration pair for both dialects: make sql NAME=add_something
 	@echo "Generating SQL..."
-	migrate create -ext sql -format unix -dir ./migrations/ $(NAME)
+	migrate create -ext sql -format unix -dir ./migrations/postgres/ $(NAME)
+	migrate create -ext sql -format unix -dir ./migrations/sqlite/ $(NAME)
 
 .PHONY: help
 help: ## Show this help message

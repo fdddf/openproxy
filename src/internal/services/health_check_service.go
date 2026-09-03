@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/fdddf/openproxy/common"
@@ -20,13 +21,22 @@ import (
 // HealthCheckService periodically validates providers and refreshes tokens.
 type HealthCheckService interface {
 	Start()
+	Stop()
 	RefreshProviderToken(provider *models.Provider) error
 }
+
+// healthCheckInterval is how often providers are re-checked.
+const healthCheckInterval = time.Hour
 
 type healthCheckService struct {
 	dbService       DatabaseService
 	settingsService SettingsService
 	providerService ProviderService
+
+	done      chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
+	wg        sync.WaitGroup
 }
 
 // NewHealthCheckService creates a background health checker.
@@ -35,18 +45,37 @@ func NewHealthCheckService(dbService DatabaseService, settingsService SettingsSe
 		dbService:       dbService,
 		settingsService: settingsService,
 		providerService: providerService,
+		done:            make(chan struct{}),
 	}
 }
 
 func (h *healthCheckService) Start() {
-	go h.loop()
+	h.startOnce.Do(func() {
+		h.wg.Add(1)
+		go h.loop()
+	})
+}
+
+// Stop signals the loop to exit and waits for the in-flight pass to finish.
+func (h *healthCheckService) Stop() {
+	h.stopOnce.Do(func() { close(h.done) })
+	h.wg.Wait()
 }
 
 func (h *healthCheckService) loop() {
-	const interval = time.Hour
+	defer h.wg.Done()
+
+	ticker := time.NewTicker(healthCheckInterval)
+	defer ticker.Stop()
+
+	h.runOnce()
 	for {
-		h.runOnce()
-		time.Sleep(interval)
+		select {
+		case <-ticker.C:
+			h.runOnce()
+		case <-h.done:
+			return
+		}
 	}
 }
 

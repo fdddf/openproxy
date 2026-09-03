@@ -3,16 +3,23 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fdddf/openproxy/common"
 	"github.com/fdddf/openproxy/internal/dao"
+	"github.com/fdddf/openproxy/migrations"
+	gormsqlite "github.com/glebarez/sqlite"
 	"github.com/golang-migrate/migrate/v4"
 	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
-	gormpostgres "gorm.io/driver/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	gormpostgres "gorm.io/driver/postgres"
 )
 
 // DatabaseServiceImpl implements the DatabaseService interface
@@ -40,17 +47,30 @@ func (d *DatabaseServiceImpl) GetDAO() *dao.Query {
 	return d.dao
 }
 
-// InitDatabase initializes the database connection
+// InitDatabase opens the configured database, applies migrations, and wires up
+// the generated DAO.
 func (d *DatabaseServiceImpl) InitDatabase() error {
 	cfg := d.configService.GetConfig()
-	dsn, err := buildPostgresDSN(cfg.Database)
+	dbConfig := cfg.Database
+
+	var (
+		gormDB *gorm.DB
+		err    error
+	)
+
+	gormCfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
+
+	switch dbConfig.Driver {
+	case common.DriverSQLite:
+		gormDB, err = openSQLite(dbConfig, gormCfg)
+	case common.DriverPostgres:
+		gormDB, err = openPostgres(dbConfig, gormCfg)
+	default:
+		return fmt.Errorf("unsupported database driver %q (want %q or %q)",
+			dbConfig.Driver, common.DriverSQLite, common.DriverPostgres)
+	}
 	if err != nil {
 		return err
-	}
-
-	gormDB, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		return fmt.Errorf("connect postgres: %w", err)
 	}
 
 	sqlDB, err := gormDB.DB()
@@ -58,7 +78,15 @@ func (d *DatabaseServiceImpl) InitDatabase() error {
 		return fmt.Errorf("init sql db handle: %w", err)
 	}
 
-	if err := runMigrations(sqlDB, cfg.Database); err != nil {
+	if dbConfig.Driver == common.DriverSQLite {
+		// SQLite serialises writes at the file level. WAL plus a busy timeout
+		// (set in the DSN) lets readers run concurrently, but a single writer
+		// connection avoids SQLITE_BUSY under load.
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+	}
+
+	if err := runMigrations(sqlDB, dbConfig); err != nil {
 		return err
 	}
 
@@ -66,6 +94,51 @@ func (d *DatabaseServiceImpl) InitDatabase() error {
 	dao.SetDefault(gormDB)
 	d.dao = dao.Q
 	return nil
+}
+
+func openSQLite(dbConfig common.DatabaseConfig, gormCfg *gorm.Config) (*gorm.DB, error) {
+	path := dbConfig.Path
+	if path == "" {
+		path = common.DefaultSQLitePath
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sqlite path %q: %w", path, err)
+	}
+	if dir := filepath.Dir(absPath); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create sqlite directory %q: %w", dir, err)
+		}
+	}
+
+	// WAL keeps readers from blocking the writer; busy_timeout makes the ones
+	// that do collide wait instead of failing outright.
+	dsn := "file:" + absPath + "?" + strings.Join([]string{
+		"_pragma=journal_mode(WAL)",
+		"_pragma=busy_timeout(5000)",
+		"_pragma=synchronous(NORMAL)",
+		"_pragma=foreign_keys(ON)",
+	}, "&")
+
+	gormDB, err := gorm.Open(gormsqlite.Open(dsn), gormCfg)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite %s: %w", absPath, err)
+	}
+	return gormDB, nil
+}
+
+func openPostgres(dbConfig common.DatabaseConfig, gormCfg *gorm.Config) (*gorm.DB, error) {
+	dsn, err := buildPostgresDSN(dbConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	gormDB, err := gorm.Open(gormpostgres.Open(dsn), gormCfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect postgres: %w", err)
+	}
+	return gormDB, nil
 }
 
 func buildPostgresDSN(dbConfig common.DatabaseConfig) (string, error) {
@@ -105,15 +178,20 @@ func buildPostgresDSN(dbConfig common.DatabaseConfig) (string, error) {
 }
 
 func runMigrations(sqlDB *sql.DB, dbConfig common.DatabaseConfig) error {
-	migrationsPath := dbConfig.MigrationsPath
-	if migrationsPath == "" {
-		migrationsPath = "./migrations"
-	}
-
-	sourceURL, err := resolveMigrationsSource(migrationsPath)
+	source, err := migrationSource(dbConfig)
 	if err != nil {
 		return err
 	}
+
+	if dbConfig.Driver == common.DriverSQLite {
+		return runSQLiteMigrations(sqlDB, source)
+	}
+
+	src, err := iofs.New(source, ".")
+	if err != nil {
+		return fmt.Errorf("open migrations: %w", err)
+	}
+	defer src.Close()
 
 	driver, err := migratepg.WithInstance(sqlDB, &migratepg.Config{
 		DatabaseName: dbConfig.Name,
@@ -122,7 +200,7 @@ func runMigrations(sqlDB *sql.DB, dbConfig common.DatabaseConfig) error {
 		return fmt.Errorf("create postgres migration driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(sourceURL, dbConfig.Name, driver)
+	m, err := migrate.NewWithInstance("iofs", src, dbConfig.Name, driver)
 	if err != nil {
 		return fmt.Errorf("init migrations: %w", err)
 	}
@@ -134,10 +212,20 @@ func runMigrations(sqlDB *sql.DB, dbConfig common.DatabaseConfig) error {
 	return nil
 }
 
-func resolveMigrationsSource(path string) (string, error) {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve migrations path: %w", err)
+// migrationSource returns the migration set for the configured driver. It uses
+// the migrations embedded in the binary unless an explicit path is configured.
+func migrationSource(dbConfig common.DatabaseConfig) (fs.FS, error) {
+	if path := dbConfig.MigrationsPath; path != "" {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve migrations path: %w", err)
+		}
+		return os.DirFS(absPath), nil
 	}
-	return "file://" + filepath.ToSlash(absPath), nil
+
+	sub, err := fs.Sub(migrations.FS, dbConfig.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("locate embedded migrations for %q: %w", dbConfig.Driver, err)
+	}
+	return sub, nil
 }

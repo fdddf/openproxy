@@ -1,0 +1,4 @@
+ALTER TABLE api_keys
+    DROP COLUMN IF EXISTS quota,
+    DROP COLUMN IF EXISTS used,
+    DROP COLUMN IF EXISTS reset_time;

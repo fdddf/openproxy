@@ -1,10 +1,8 @@
 package codex
 
 import (
-	"os"
-
 	"github.com/fdddf/openproxy/common"
-	"github.com/gofiber/fiber/v2/log"
+	"github.com/fdddf/openproxy/statics"
 )
 
 type ResponseItem map[string]any
@@ -34,16 +32,7 @@ func ChatToResponses(req common.ChatCompletionRequest) ResponsesRequest {
 	var instructions string
 	var input []ResponseItem
 
-	prompt, err := os.ReadFile("statics/prompt.md")
-	if err != nil {
-		log.Errorf("read prompt.md failed: %v", err)
-	}
-
-	if prompt == nil {
-		instructions = `You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.`
-	} else {
-		instructions = string(prompt)
-	}
+	instructions = statics.Prompt
 
 	for _, msg := range req.Messages {
 		if msg.Role == "system" {

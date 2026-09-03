@@ -48,14 +48,49 @@ func SplitScopes(raw string) []string {
 	return scopes
 }
 
+// Database drivers supported by the server.
+const (
+	DriverSQLite   = "sqlite"
+	DriverPostgres = "postgres"
+)
+
+// DefaultSQLitePath is where the database file lands when nothing is configured.
+const DefaultSQLitePath = "./openproxy.db"
+
 type DatabaseConfig struct {
-	Host           string `yaml:"host"`
-	Port           int    `yaml:"port"`
-	User           string `yaml:"user"`
-	Password       string `yaml:"password"`
-	Name           string `yaml:"name"`
-	SSLMode        string `yaml:"ssl_mode"`
+	// Driver selects the backend: "sqlite" (default) or "postgres".
+	Driver string `yaml:"driver"`
+
+	// Path is the SQLite database file. Only used when Driver is "sqlite".
+	Path string `yaml:"path"`
+
+	// The remaining fields only apply to Postgres.
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Name     string `yaml:"name"`
+	SSLMode  string `yaml:"ssl_mode"`
+
+	// MigrationsPath overrides the embedded migration set with a directory on
+	// disk. Leave empty to use the migrations compiled into the binary.
 	MigrationsPath string `yaml:"migrations_path"`
+}
+
+// RequestLogConfig controls how much of each proxied request is persisted.
+// The defaults matter most on SQLite, where unbounded bodies grow the file fast.
+type RequestLogConfig struct {
+	// Enabled turns request logging on. Default true.
+	Enabled *bool `yaml:"enabled"`
+	// MaxBodyBytes truncates stored request/response bodies. 0 disables the cap.
+	MaxBodyBytes int `yaml:"max_body_bytes"`
+	// RetentionDays deletes records older than this. 0 keeps everything.
+	RetentionDays int `yaml:"retention_days"`
+}
+
+// LoggingEnabled reports whether request logging is on, defaulting to true.
+func (r RequestLogConfig) LoggingEnabled() bool {
+	return r.Enabled == nil || *r.Enabled
 }
 
 // 配置结构体
@@ -66,7 +101,34 @@ type Config struct {
 		JWTSignKey      string `yaml:"jwt_sign_key"`
 	} `yaml:"proxy"`
 
-	Database DatabaseConfig `yaml:"database"`
+	Database   DatabaseConfig   `yaml:"database"`
+	RequestLog RequestLogConfig `yaml:"request_log"`
+}
+
+// ApplyDefaults fills in the values that let the binary start with no config
+// file at all: SQLite in the working directory, listening on :8081.
+func (c *Config) ApplyDefaults() {
+	if c.Proxy.ListenAddress == "" {
+		c.Proxy.ListenAddress = ":8081"
+	}
+	if c.Database.Driver == "" {
+		// An existing Postgres config without an explicit driver keeps working.
+		if c.Database.Host != "" || c.Database.Name != "" {
+			c.Database.Driver = DriverPostgres
+		} else {
+			c.Database.Driver = DriverSQLite
+		}
+	}
+	c.Database.Driver = strings.ToLower(strings.TrimSpace(c.Database.Driver))
+	if c.Database.Driver == DriverSQLite && c.Database.Path == "" {
+		c.Database.Path = DefaultSQLitePath
+	}
+	if c.RequestLog.MaxBodyBytes == 0 {
+		c.RequestLog.MaxBodyBytes = 64 * 1024
+	}
+	if c.RequestLog.RetentionDays == 0 {
+		c.RequestLog.RetentionDays = 30
+	}
 }
 
 // LoadFromEnv loads configuration from environment variables, with fallbacks to the original config
@@ -77,6 +139,15 @@ func (c *Config) LoadFromEnv() {
 	}
 
 	// Load database config from environment variables
+	if driver := os.Getenv("DB_DRIVER"); driver != "" {
+		c.Database.Driver = driver
+	}
+	if dbPath := os.Getenv("DB_PATH"); dbPath != "" {
+		c.Database.Path = dbPath
+	}
+	if addr := os.Getenv("LISTEN_ADDRESS"); addr != "" {
+		c.Proxy.ListenAddress = addr
+	}
 	if dbHost := os.Getenv("DB_HOST"); dbHost != "" {
 		c.Database.Host = dbHost
 	}

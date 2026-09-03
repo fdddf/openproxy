@@ -34,6 +34,9 @@ func newAPIKey(db *gorm.DB, opts ...gen.DOOption) aPIKey {
 	_aPIKey.Key = field.NewString(tableName, "key")
 	_aPIKey.Name = field.NewString(tableName, "name")
 	_aPIKey.UserID = field.NewUint(tableName, "user_id")
+	_aPIKey.Quota = field.NewInt64(tableName, "quota")
+	_aPIKey.Used = field.NewInt64(tableName, "used")
+	_aPIKey.ResetTime = field.NewTime(tableName, "reset_time")
 
 	_aPIKey.fillFieldMap()
 
@@ -51,6 +54,9 @@ type aPIKey struct {
 	Key       field.String
 	Name      field.String
 	UserID    field.Uint
+	Quota     field.Int64
+	Used      field.Int64
+	ResetTime field.Time
 
 	fieldMap map[string]field.Expr
 }
@@ -74,6 +80,9 @@ func (a *aPIKey) updateTableName(table string) *aPIKey {
 	a.Key = field.NewString(table, "key")
 	a.Name = field.NewString(table, "name")
 	a.UserID = field.NewUint(table, "user_id")
+	a.Quota = field.NewInt64(table, "quota")
+	a.Used = field.NewInt64(table, "used")
+	a.ResetTime = field.NewTime(table, "reset_time")
 
 	a.fillFieldMap()
 
@@ -90,7 +99,7 @@ func (a *aPIKey) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 }
 
 func (a *aPIKey) fillFieldMap() {
-	a.fieldMap = make(map[string]field.Expr, 7)
+	a.fieldMap = make(map[string]field.Expr, 10)
 	a.fieldMap["id"] = a.ID
 	a.fieldMap["created_at"] = a.CreatedAt
 	a.fieldMap["updated_at"] = a.UpdatedAt
@@ -98,6 +107,9 @@ func (a *aPIKey) fillFieldMap() {
 	a.fieldMap["key"] = a.Key
 	a.fieldMap["name"] = a.Name
 	a.fieldMap["user_id"] = a.UserID
+	a.fieldMap["quota"] = a.Quota
+	a.fieldMap["used"] = a.Used
+	a.fieldMap["reset_time"] = a.ResetTime
 }
 
 func (a aPIKey) clone(db *gorm.DB) aPIKey {

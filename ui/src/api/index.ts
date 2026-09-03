@@ -39,7 +39,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && window.location.pathname !== '/setup') {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       window.location.href = '/login'
@@ -52,6 +52,22 @@ apiClient.interceptors.response.use(
 class APIService {
   private paginationParams(params?: any) {
     return params || {}
+  }
+
+  // First-run setup
+  async getSetupStatus(): Promise<{ needsSetup: boolean }> {
+    const response = await apiClient.get('/setup/status')
+    return response.data
+  }
+
+  async completeSetup(payload: {
+    username: string
+    password: string
+    email?: string
+    displayName?: string
+  }): Promise<{ token: string, user: User }> {
+    const response = await apiClient.post('/setup', payload)
+    return response.data
   }
 
   // Authentication

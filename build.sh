@@ -18,6 +18,13 @@ function docker_build_and_push() {
 
 docker_build_and_push $NAME $COMMIT "Dockerfile" .
 
+# config.yaml holds local secrets and is gitignored; fall back to the sample so
+# a clean checkout can still render the manifest.
+CONFIG_SRC="src/config.yaml"
+if [ ! -f "$CONFIG_SRC" ]; then
+  CONFIG_SRC="src/config.example.yaml"
+fi
+
 cat <<EOF > deploy_k8s.yaml
 ---
 apiVersion: v1
@@ -26,7 +33,7 @@ metadata:
   name: openproxy-config
 data:
   config.yaml: |
-$(cat src/config.yaml | sed 's/^/    /')
+$(sed 's/^/    /' "$CONFIG_SRC")
 
 ---
 apiVersion: apps/v1

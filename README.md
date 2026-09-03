@@ -2,6 +2,8 @@
 
 A flexible API proxy server for OpenAI-compatible APIs. Written in Go with a Vue.js admin interface.
 
+![Dashboard](docs/images/dashboard.png)
+
 ## Features
 
 - Multiple provider support (OpenAI, Anthropic, Gemini, and custom providers)
@@ -12,11 +14,29 @@ A flexible API proxy server for OpenAI-compatible APIs. Written in Go with a Vue
 - Rate limiting per API key
 - Health monitoring for providers
 
+## Quick Start
+
+The binary is self-contained: the admin UI, the SQL migrations, and the static
+assets are compiled into it, and it defaults to a SQLite file in the working
+directory. No config file, no database server.
+
+```bash
+cd src && make all-in-one   # builds the UI, then ../bin/openproxy
+../bin/openproxy            # creates ./openproxy.db and listens on :8081
+```
+
+Open <http://localhost:8081>. On first start there is no account yet, so the UI
+shows a setup page where you create the administrator.
+
+<p align="center">
+  <img src="docs/images/setup.png" alt="First-run setup" width="70%">
+</p>
+
 ## Prerequisites
 
 - Go 1.24 or later
-- PostgreSQL database
-- Node.js 18+ (for frontend development)
+- Node.js 18+ (only to build the admin UI)
+- PostgreSQL (optional — only if you choose the `postgres` driver)
 
 ## Installation
 
@@ -24,74 +44,73 @@ A flexible API proxy server for OpenAI-compatible APIs. Written in Go with a Vue
 
 ```bash
 git clone https://github.com/fdddf/openproxy.git
-cd openproxy
-cd src && go build -o ../bin/openproxy .
+cd openproxy/src
+make all-in-one
 ```
+
+`make build` alone produces a binary without the UI; `make ui` builds the UI
+into `src/internal/web/dist`, which `go:embed` picks up.
 
 ### Using Docker
 
 ```bash
 docker build -t openproxy .
+docker run -p 8081:8081 -v openproxy-data:/data openproxy
 ```
 
 ## Configuration
 
 ### Environment Variables
 
-Sensitive configuration should be set via environment variables:
+Environment variables override the config file. Everything has a default;
+nothing below is required to start.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `JWT_SIGN_KEY` | Secret key for JWT signing | (required) |
-| `DB_HOST` | Database host | `localhost` |
-| `DB_PORT` | Database port | `5432` |
-| `DB_USER` | Database user | `gptproxy` |
-| `DB_PASSWORD` | Database password | (required) |
-| `DB_NAME` | Database name | `gptproxy` |
-| `DB_SSL_MODE` | Database SSL mode | `disable` |
+| `LISTEN_ADDRESS` | Address to listen on | `:8081` |
+| `JWT_SIGN_KEY` | Secret key for JWT signing | generated and persisted on first start |
+| `DB_DRIVER` | `sqlite` or `postgres` | `sqlite` |
+| `DB_PATH` | SQLite database file | `./openproxy.db` |
+| `DB_HOST` | Postgres host | — |
+| `DB_PORT` | Postgres port | `5432` |
+| `DB_USER` | Postgres user | — |
+| `DB_PASSWORD` | Postgres password | — |
+| `DB_NAME` | Postgres database name | — |
+| `DB_SSL_MODE` | Postgres SSL mode | `disable` |
 
 ### Config File
 
-Create `src/config.yaml`:
+Optional. See `src/config.example.yaml` for every setting; copy it to
+`src/config.yaml` to override defaults, or pass `--config /path/to/config.yaml`.
+
+## Database
+
+Migrations are embedded in the binary and applied automatically at startup, for
+both drivers. `migrations/sqlite` and `migrations/postgres` hold one set each.
+
+**SQLite (default).** Nothing to set up. The file is created on first start,
+with WAL enabled.
+
+**Postgres.** Create the database, then point the config at it:
 
 ```yaml
-proxy:
-  listen_address: ":8081"
-  default_provider: "openai"
-
 database:
-  host: "localhost"
+  driver: postgres
+  host: localhost
   port: 5432
-  user: "gptproxy"
-  password: "your_password"
-  name: "gptproxy"
-  ssl_mode: "disable"
-  migrations_path: "./migrations"
+  user: gptproxy
+  password: your_password
+  name: gptproxy
 ```
 
-## Database Setup
-
-1. Create a PostgreSQL database:
-   ```bash
-   createdb gptproxy
-   ```
-
-2. Run migrations (automatic on server start, or manually):
-   ```bash
-   cd src
-   migrate -path ./migrations -database "postgres://user:pass@localhost:5432/gptproxy?sslmode=disable" up
-   ```
+Existing Postgres installs upgrade in place; their migration history is
+unchanged.
 
 ## Usage
 
 ### Start the Server
 
 ```bash
-# Set environment variables
-export JWT_SIGN_KEY="your-secret-key"
-export DB_PASSWORD="your-db-password"
-
-# Run the server
 ./bin/openproxy
 ```
 
@@ -119,11 +138,44 @@ curl http://localhost:8081/v1/models \
 
 ### Admin Interface
 
-Access the admin dashboard at `http://localhost:8081/admin`. 
+Access the admin dashboard at `http://localhost:8081`.
 
-Default credentials: `admin` / `admin123`
+There are no default credentials. The first time you open the UI on a fresh
+database it redirects to `/setup`, where you create the administrator account.
 
-**Important:** Change the default password immediately after first login!
+Accounts are not self-service: only a super user can create further users, and
+only super users can manage providers, models, and settings.
+
+## Screenshots
+
+### Providers
+
+Each provider holds its credentials, base URL, and health-check state. Keys are
+masked in the API and the UI; editing a provider without touching the field
+leaves the stored secret alone.
+
+![Providers](docs/images/providers.png)
+
+### Model mappings
+
+Mappings control the name clients ask for and the upstream model it resolves to,
+so you can expose `gpt-4o` from whichever provider is currently cheapest.
+
+![Model mappings](docs/images/models.png)
+
+### Request history
+
+Every proxied call is recorded with status, latency, token counts, and estimated
+cost, and the full request and response bodies can be inspected per row.
+
+![Request history](docs/images/requests.png)
+
+### API keys
+
+Keys are issued per user and are what clients present to the proxy; the upstream
+provider credentials never leave the server.
+
+![API keys](docs/images/keys.png)
 
 ## Development
 
@@ -149,12 +201,20 @@ cd ui
 npm run build
 ```
 
+### Request Logging
+
+Proxied requests are recorded for the dashboard. Because that includes prompt and
+response bodies, they are truncated (64 KB by default) and pruned after 30 days.
+Tune or disable it under `request_log` in the config file.
+
 ## Security
 
 - **Environment Variables**: Never commit sensitive data to version control
 - **API Keys**: Generate secure, random API keys
-- **JWT Secrets**: Use strong, unique secrets for JWT signing
+- **JWT Secrets**: A key is generated on first start; set `JWT_SIGN_KEY` to pin your own
 - **Database**: Use SSL in production environments
+- **Exposure**: The proxy has no transport security of its own. Put it behind TLS
+  before exposing it beyond localhost.
 
 ## License
 

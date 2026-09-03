@@ -1,0 +1,29 @@
+# Every value here has a default — the binary runs with no config file at all,
+# storing data in ./openproxy.db. Copy to config.yaml only to override.
+
+proxy:
+  listen_address: ":8081"
+  default_provider: "openai"
+  # Leave empty to have a key generated and persisted on first start.
+  # Override with the JWT_SIGN_KEY environment variable.
+  jwt_sign_key: ""
+
+database:
+  # "sqlite" (default) or "postgres"
+  driver: "sqlite"
+  path: "./openproxy.db"
+
+  # Only read when driver is "postgres":
+  # host: "localhost"
+  # port: 5432
+  # user: "gptproxy"
+  # password: "your_password"
+  # name: "gptproxy"
+  # ssl_mode: "disable"
+
+# Proxied requests are recorded for the dashboard. Bodies are truncated and old
+# records pruned so a local SQLite file does not grow without bound.
+request_log:
+  enabled: true
+  max_body_bytes: 65536
+  retention_days: 30
