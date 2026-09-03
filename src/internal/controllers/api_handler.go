@@ -14,6 +14,7 @@ type Controller struct {
 	requestService        services.RequestService
 	settingsService       services.SettingsService
 	statsService          services.StatsService
+	setupService          services.SetupService
 }
 
 // NewController creates a new controller instance
@@ -25,6 +26,7 @@ func NewController(
 	requestService services.RequestService,
 	settingsService services.SettingsService,
 	statsService services.StatsService,
+	setupService services.SetupService,
 ) *Controller {
 	return &Controller{
 		apiService:            apiService,
@@ -34,46 +36,65 @@ func NewController(
 		requestService:        requestService,
 		settingsService:       settingsService,
 		statsService:          statsService,
+		setupService:          setupService,
 	}
 }
 
-// RegisterRoutes registers all the API routes
-func RegisterRoutes(app *fiber.App, controller *Controller, authMiddleware fiber.Handler) {
+// RegisterRoutes registers all the API routes.
+//
+// Routes fall into three tiers: public (login and first-run setup), any
+// authenticated user (their own profile and API keys), and super users only
+// (providers, settings, and anything spanning all users).
+func RegisterRoutes(app *fiber.App, controller *Controller, authMiddleware, adminMiddleware fiber.Handler) {
 	api := app.Group("/api")
 	api.Post("/login", controller.HandleLogin)
+	api.Get("/setup/status", controller.HandleGetSetupStatus)
+	api.Post("/setup", controller.HandleSetup)
 
 	apiAuthorized := api.Group("", authMiddleware)
 	apiAuthorized.Post("/logout", controller.HandleLogout)
 	apiAuthorized.Post("/reset-password", controller.HandleResetPassword)
+	apiAuthorized.Get("/user", controller.HandleGetUser)
+	apiAuthorized.Put("/user", controller.HandleUpdateCurrentUser)
 	apiAuthorized.Get("/keys", controller.HandleGetAPIKeys)
 	apiAuthorized.Post("/keys", controller.HandleCreateAPIKey)
 	apiAuthorized.Delete("/keys/:id", controller.HandleDeleteAPIKey)
-	apiAuthorized.Get("/logs", controller.HandleGetLogs)
 	apiAuthorized.Get("/models", controller.HandleGetModels)
-	apiAuthorized.Post("/models", controller.HandleCreateModel)
-	apiAuthorized.Put("/models/:id", controller.HandleUpdateModel)
-	apiAuthorized.Delete("/models/:id", controller.HandleDeleteModel)
-	apiAuthorized.Get("/providers", controller.HandleGetProviders)
-	apiAuthorized.Get("/platforms", controller.HandleGetProviderPlatforms)
-	apiAuthorized.Post("/providers", controller.HandleCreateProvider)
-	apiAuthorized.Put("/providers/:id", controller.HandleUpdateProvider)
-	apiAuthorized.Delete("/providers/:id", controller.HandleDeleteProvider)
-	apiAuthorized.Post("/providers/:id/refresh-token", controller.HandleRefreshToken)
-	apiAuthorized.Get("/requests", controller.HandleGetRequests)
-	apiAuthorized.Get("/users", controller.HandleListUsers)
-	apiAuthorized.Post("/users", controller.HandleCreateUser)
-	apiAuthorized.Put("/users/:id", controller.HandleUpdateUser)
-	apiAuthorized.Delete("/users/:id", controller.HandleDeleteUser)
-	apiAuthorized.Get("/settings", controller.HandleGetSettings)
-	apiAuthorized.Put("/settings", controller.HandleUpdateSettings)
-	apiAuthorized.Get("/user", controller.HandleGetUser)
-	apiAuthorized.Put("/user", controller.HandleUpdateCurrentUser)
-	apiAuthorized.Get("/stats", controller.HandleGetStats)
 
-	// OAuth2 endpoints - accessible without authentication
-	api.Get("/oauth2/callback", controller.HandleOAuth2Callback)  // This can still be used for redirects
-	api.Post("/oauth2/callback", controller.HandleOAuth2Callback) // This is for the actual token exchange
-	api.Post("/oauth2/session", controller.HandleCreateOAuthSession)
+	apiAdmin := apiAuthorized.Group("", adminMiddleware)
+	apiAdmin.Post("/models", controller.HandleCreateModel)
+	apiAdmin.Put("/models/:id", controller.HandleUpdateModel)
+	apiAdmin.Delete("/models/:id", controller.HandleDeleteModel)
+	apiAdmin.Get("/providers", controller.HandleGetProviders)
+	apiAdmin.Get("/platforms", controller.HandleGetProviderPlatforms)
+	apiAdmin.Post("/providers", controller.HandleCreateProvider)
+	apiAdmin.Put("/providers/:id", controller.HandleUpdateProvider)
+	apiAdmin.Delete("/providers/:id", controller.HandleDeleteProvider)
+	apiAdmin.Post("/providers/:id/refresh-token", controller.HandleRefreshToken)
+	apiAdmin.Get("/requests", controller.HandleGetRequests)
+	apiAdmin.Get("/logs", controller.HandleGetLogs)
+	apiAdmin.Get("/stats", controller.HandleGetStats)
+	apiAdmin.Get("/users", controller.HandleListUsers)
+	apiAdmin.Post("/users", controller.HandleCreateUser)
+	apiAdmin.Put("/users/:id", controller.HandleUpdateUser)
+	apiAdmin.Delete("/users/:id", controller.HandleDeleteUser)
+	apiAdmin.Get("/settings", controller.HandleGetSettings)
+	apiAdmin.Put("/settings", controller.HandleUpdateSettings)
+
+	// OAuth2 endpoints - the provider redirects a browser here, so they cannot
+	// require an Authorization header. The session id issued at /oauth2/session
+	// (an admin route) is what ties a callback to a provider.
+	api.Get("/oauth2/callback", controller.HandleOAuth2Callback)
+	api.Post("/oauth2/callback", controller.HandleOAuth2Callback)
+	apiAdmin.Post("/oauth2/session", controller.HandleCreateOAuthSession)
+}
+
+func (c *Controller) HandleGetSetupStatus(ctx *fiber.Ctx) error {
+	return c.setupService.HandleGetSetupStatus(ctx)
+}
+
+func (c *Controller) HandleSetup(ctx *fiber.Ctx) error {
+	return c.setupService.HandleSetup(ctx)
 }
 
 func (c *Controller) HandleLogin(ctx *fiber.Ctx) error {

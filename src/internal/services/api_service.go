@@ -47,31 +47,18 @@ func (a *APIServiceImpl) HandleLogin(c *fiber.Ctx) error {
 	dao := a.dbService.GetDAO()
 
 	user, err := dao.User.Where(dao.User.Username.Eq(req.Username)).First()
-
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Create a new user
-			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-			if err != nil {
-				return common.HandleError(c, fiber.StatusInternalServerError, "Failed to hash password")
-			}
-			newUser := models.User{
-				Username:     req.Username,
-				PasswordHash: string(hashedPassword),
-				DisplayName:  req.Username,
-			}
-			if err := dao.User.Create(&newUser); err != nil {
-				return common.HandleError(c, fiber.StatusInternalServerError, "Failed to create user")
-			}
-			user = &newUser
-		} else {
-			return common.HandleError(c, fiber.StatusInternalServerError, "Database error")
-		}
-	} else {
-		// Check password
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+			// This endpoint used to create the account when the username was
+			// unknown, which made login an open registration form. Unknown users
+			// are now rejected like a bad password, without revealing which.
 			return common.HandleError(c, fiber.StatusUnauthorized, "Invalid credentials")
 		}
+		return common.HandleError(c, fiber.StatusInternalServerError, "Database error")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		return common.HandleError(c, fiber.StatusUnauthorized, "Invalid credentials")
 	}
 
 	// Create token

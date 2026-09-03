@@ -82,10 +82,3 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
-
--- Default admin user with password 'admin123'
--- IMPORTANT: Change this password immediately after first login!
--- Password hash generated with bcrypt for 'admin123'
-INSERT INTO users (username, password_hash, is_super)
-VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', TRUE)
-ON CONFLICT (username) DO NOTHING;

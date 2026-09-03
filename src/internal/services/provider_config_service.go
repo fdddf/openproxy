@@ -169,7 +169,7 @@ func (p *ProviderConfigServiceImpl) HandleUpdateProvider(c *fiber.Ctx) error {
 
 	provider.Name = req.Name
 	provider.Platform = consts.ProviderPlatform(req.Type)
-	provider.ApiKey = req.Key
+	provider.ApiKey = keepUnlessChanged(req.Key, provider.ApiKey)
 	provider.BaseURL = req.BaseURL
 	provider.ProxyURL = req.ProxyURL
 	provider.IsActive = req.IsActive
@@ -178,7 +178,7 @@ func (p *ProviderConfigServiceImpl) HandleUpdateProvider(c *fiber.Ctx) error {
 		provider.HealthCheckStatus = strings.TrimSpace(req.HealthCheckStatus)
 	}
 	provider.ClientID = req.ClientID
-	provider.ClientSecret = req.ClientSecret
+	provider.ClientSecret = keepUnlessChanged(req.ClientSecret, provider.ClientSecret)
 	provider.AuthURL = req.AuthURL
 	provider.TokenURL = req.TokenURL
 	provider.RedirectURL = req.RedirectURL
@@ -525,4 +525,15 @@ func (p *ProviderConfigServiceImpl) HandleRefreshToken(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(dto.NewProvider(provider, modelsList))
+}
+
+// keepUnlessChanged resolves a secret submitted by the admin UI. The UI renders
+// the masked value returned by dto.NewProvider, so a submission that still
+// matches that mask means the field was left untouched and the stored secret
+// must survive the update.
+func keepUnlessChanged(submitted, current string) string {
+	if current != "" && submitted == dto.MaskSecret(current) {
+		return current
+	}
+	return submitted
 }

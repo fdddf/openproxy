@@ -16,18 +16,21 @@ export const useAuthStore = defineStore('auth', {
   }),
   
   actions: {
+    // Persists a freshly issued token. Shared by login and first-run setup,
+    // which both hand back a token/user pair.
+    setSession(token: string, user: User) {
+      localStorage.setItem('token', token)
+      localStorage.setItem('user', JSON.stringify(user))
+
+      this.token = token
+      this.user = user
+      this.isAuthenticated = true
+    },
+
     async login(username: string, password: string) {
       try {
-        const response = await apiService.login(username, password)
-        const { token, user } = response
-        
-        localStorage.setItem('token', token)
-        localStorage.setItem('user', JSON.stringify(user))
-        
-        this.token = token
-        this.user = user
-        this.isAuthenticated = true
-        
+        const { token, user } = await apiService.login(username, password)
+        this.setSession(token, user)
         return true
       } catch (error) {
         console.error('Login failed:', error)
