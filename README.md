@@ -2,6 +2,8 @@
 
 A flexible API proxy server for OpenAI-compatible APIs. Written in Go with a Vue.js admin interface.
 
+![Dashboard](docs/images/dashboard.png)
+
 ## Features
 
 - Multiple provider support (OpenAI, Anthropic, Gemini, and custom providers)
@@ -25,6 +27,10 @@ cd src && make all-in-one   # builds the UI, then ../bin/openproxy
 
 Open <http://localhost:8081>. On first start there is no account yet, so the UI
 shows a setup page where you create the administrator.
+
+<p align="center">
+  <img src="docs/images/setup.png" alt="First-run setup" width="70%">
+</p>
 
 ## Prerequisites
 
@@ -139,6 +145,37 @@ database it redirects to `/setup`, where you create the administrator account.
 
 Accounts are not self-service: only a super user can create further users, and
 only super users can manage providers, models, and settings.
+
+## Screenshots
+
+### Providers
+
+Each provider holds its credentials, base URL, and health-check state. Keys are
+masked in the API and the UI; editing a provider without touching the field
+leaves the stored secret alone.
+
+![Providers](docs/images/providers.png)
+
+### Model mappings
+
+Mappings control the name clients ask for and the upstream model it resolves to,
+so you can expose `gpt-4o` from whichever provider is currently cheapest.
+
+![Model mappings](docs/images/models.png)
+
+### Request history
+
+Every proxied call is recorded with status, latency, token counts, and estimated
+cost, and the full request and response bodies can be inspected per row.
+
+![Request history](docs/images/requests.png)
+
+### API keys
+
+Keys are issued per user and are what clients present to the proxy; the upstream
+provider credentials never leave the server.
+
+![API keys](docs/images/keys.png)
 
 ## Development
 

@@ -5,7 +5,7 @@
         <div>
           <p class="text-sm font-medium text-gray-600">{{ label }}</p>
           <p class="text-2xl font-bold text-gray-900 mt-1">{{ value }}</p>
-          <p class="text-xs text-gray-500 mt-2">
+          <p v-if="trendText" class="text-xs text-gray-500 mt-2">
             <i :class="trendIcon" class="mr-1"></i>
             {{ trendText }}
           </p>

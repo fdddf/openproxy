@@ -13,7 +13,7 @@ type APIKey struct {
 	Description string     `json:"description"`
 	IsActive    bool       `json:"isActive"`
 	UsageCount  int        `json:"usageCount"`
-	MaxUsage    *int       `json:"maxUsage,omitempty"`
+	MaxUsage    *int64     `json:"maxUsage,omitempty"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
@@ -26,9 +26,8 @@ func NewAPIKey(apiKey *models.APIKey) APIKey {
 		Key:         apiKey.Key,
 		Description: apiKey.Name,
 		IsActive:    true,
-		UsageCount:  0,
-		MaxUsage:    nil,
-		ExpiresAt:   nil,
+		MaxUsage:    apiKey.Quota,
+		ExpiresAt:   apiKey.ResetTime,
 		CreatedAt:   apiKey.CreatedAt,
 		UpdatedAt:   apiKey.UpdatedAt,
 	}

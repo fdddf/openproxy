@@ -30,6 +30,5 @@ func NewModel(model *models.Model) Model {
 		IsActive:   model.IsActive,
 		CreatedAt:  model.CreatedAt,
 		UpdatedAt:  model.UpdatedAt,
-		UsageCount: 0,
 	}
 }

@@ -142,9 +142,17 @@ func (a *APIServiceImpl) HandleGetAPIKeys(c *fiber.Ctx) error {
 		return common.HandleError(c, fiber.StatusInternalServerError, "Failed to get API keys")
 	}
 
+	ids := make([]uint, 0, len(apiKeys))
+	for _, key := range apiKeys {
+		ids = append(ids, key.ID)
+	}
+	counts := usageCounts(dao, dao.Request.APIKeyID, ids)
+
 	resp := make([]dto.APIKey, 0, len(apiKeys))
 	for _, key := range apiKeys {
-		resp = append(resp, dto.NewAPIKey(key))
+		item := dto.NewAPIKey(key)
+		item.UsageCount = counts[key.ID]
+		resp = append(resp, item)
 	}
 
 	return c.JSON(common.NewPaginatedResponse(resp, total, page, pageSize))
