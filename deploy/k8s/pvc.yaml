@@ -1,0 +1,15 @@
+# Holds the SQLite database. Drop this file (and the volume in deployment.yaml)
+# when running against Postgres.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openproxy-data
+  labels:
+    app.kubernetes.io/name: openproxy
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: standard

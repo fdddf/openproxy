@@ -51,12 +51,62 @@ make all-in-one
 `make build` alone produces a binary without the UI; `make ui` builds the UI
 into `src/internal/web/dist`, which `go:embed` picks up.
 
+### Prebuilt binaries
+
+Every tagged release publishes a self-contained binary for linux, macOS, and
+Windows on both amd64 and arm64, plus a `checksums.txt`, on the
+[releases page](https://github.com/fdddf/openproxy/releases). The admin UI is
+compiled in and the SQLite driver is pure Go, so there is nothing else to
+install:
+
+```bash
+tar -xzf openproxy_v1.0.0_linux_amd64.tar.gz
+cd openproxy_v1.0.0_linux_amd64
+./openproxy
+```
+
 ### Using Docker
+
+Images are published to `ghcr.io/fdddf/openproxy` for `linux/amd64` and
+`linux/arm64` on every push to `main` and every tag:
+
+```bash
+docker run -p 8081:8081 -v openproxy-data:/data ghcr.io/fdddf/openproxy:latest
+```
+
+Or build it yourself:
 
 ```bash
 docker build -t openproxy .
 docker run -p 8081:8081 -v openproxy-data:/data openproxy
 ```
+
+### Using Docker Compose
+
+```bash
+cp .env.example .env    # optional — every value has a working default
+docker compose up -d
+```
+
+That runs one container against SQLite on a named volume. To use Postgres
+instead, set `DB_DRIVER=postgres` and `DB_PASSWORD` in `.env`, then:
+
+```bash
+docker compose --profile postgres up -d
+```
+
+### Using Kubernetes
+
+Manifests live in [`deploy/k8s`](deploy/k8s) — Deployment, Service, PVC, Secret,
+and an optional Ingress, with a `kustomization.yaml` tying them together:
+
+```bash
+kubectl apply -k deploy/k8s
+kubectl port-forward svc/openproxy 8081:8081
+```
+
+See [`deploy/k8s/README.md`](deploy/k8s/README.md) for pinning an image tag,
+exposing the service, and switching to Postgres to scale past one replica.
 
 ## Configuration
 
@@ -134,6 +184,15 @@ curl -X POST http://localhost:8081/v1/chat/completions \
 ```bash
 curl http://localhost:8081/v1/models \
   -H 'Authorization: Bearer your-api-key'
+```
+
+#### Health Check
+
+Unauthenticated, for container and orchestrator probes:
+
+```bash
+curl http://localhost:8081/healthz
+# {"status":"ok","version":"..."}
 ```
 
 ### Admin Interface

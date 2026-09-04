@@ -1,0 +1,66 @@
+# OpenProxy — single-container deployment.
+#
+#   docker compose up -d                       # SQLite, zero configuration
+#   docker compose --profile postgres up -d    # Postgres instead of SQLite
+#
+# Then open http://localhost:8081 and create the administrator on the setup
+# page. Copy .env.example to .env to pin JWT_SIGN_KEY and the Postgres password.
+
+services:
+  openproxy:
+    image: ghcr.io/fdddf/openproxy:latest
+    # Swap the image for a local build with: docker compose build
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openproxy
+    restart: unless-stopped
+    ports:
+      - "${OPENPROXY_PORT:-8081}:8081"
+    environment:
+      # A key is generated and persisted on first start when this is empty.
+      # Set it to keep sessions valid across a database reset.
+      JWT_SIGN_KEY: "${JWT_SIGN_KEY:-}"
+      DB_DRIVER: "${DB_DRIVER:-sqlite}"
+      DB_PATH: /data/openproxy.db
+      # Only read when DB_DRIVER=postgres.
+      DB_HOST: "${DB_HOST:-postgres}"
+      DB_PORT: "${DB_PORT:-5432}"
+      DB_USER: "${DB_USER:-openproxy}"
+      DB_PASSWORD: "${DB_PASSWORD:-}"
+      DB_NAME: "${DB_NAME:-openproxy}"
+      DB_SSL_MODE: "${DB_SSL_MODE:-disable}"
+    volumes:
+      - openproxy-data:/data
+    # No depends_on: the postgres service lives behind a profile, and compose
+    # refuses to start a service whose dependency is not in the active profile.
+    # With restart: unless-stopped the proxy simply retries until Postgres is up.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Started only with `--profile postgres`; the default deployment uses the
+  # embedded SQLite file and needs no second container.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    container_name: openproxy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${DB_USER:-openproxy}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env to use the postgres profile}"
+      POSTGRES_DB: "${DB_NAME:-openproxy}"
+    volumes:
+      - openproxy-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-openproxy} -d ${DB_NAME:-openproxy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  openproxy-data:
+  openproxy-postgres:

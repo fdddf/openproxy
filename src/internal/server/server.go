@@ -11,6 +11,7 @@ import (
 	"github.com/fdddf/openproxy/internal/controllers"
 	"github.com/fdddf/openproxy/internal/services"
 	"github.com/fdddf/openproxy/internal/web"
+	"github.com/fdddf/openproxy/pkg/version"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -54,6 +55,12 @@ func StartServer(p serverParams) {
 	app.Use(logger.New())
 	app.Use(cors.New())
 	// app.Use(middleware.SecurityMiddleware())
+
+	// Unauthenticated liveness/readiness probe for container orchestrators.
+	// Registered before the static handler so it is not shadowed by the SPA.
+	app.Get("/healthz", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok", "version": version.Info()})
+	})
 
 	// Resolve the signing key before any route is wired: an unset key would
 	// otherwise sign and accept tokens with an empty secret.

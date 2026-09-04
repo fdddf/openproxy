@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - secret.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  # Uncomment once the host in ingress.yaml has been set:
+  # - ingress.yaml
+
+# Pin a released tag instead of :latest for reproducible rollouts.
+images:
+  - name: ghcr.io/fdddf/openproxy
+    newTag: latest

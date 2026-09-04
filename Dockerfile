@@ -52,6 +52,9 @@ VOLUME /data
 
 EXPOSE 8081
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8081/healthz || exit 1
+
 # Runs against SQLite with no configuration at all. To use Postgres instead,
 # set DB_DRIVER=postgres plus DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME.
 # JWT_SIGN_KEY is generated and persisted on first start when unset.

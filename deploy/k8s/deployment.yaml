@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openproxy
+  labels:
+    app.kubernetes.io/name: openproxy
+spec:
+  # SQLite on a ReadWriteOnce volume: exactly one writer. Scale past one replica
+  # only after switching DB_DRIVER to postgres and dropping the PVC below.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openproxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openproxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        # Gives the container user ownership of the mounted data volume; the
+        # database file is the only thing the process writes.
+        fsGroup: 65532
+      containers:
+        - name: openproxy
+          image: ghcr.io/fdddf/openproxy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: LISTEN_ADDRESS
+              value: ":8081"
+            - name: DB_DRIVER
+              value: "sqlite"
+            - name: DB_PATH
+              value: "/data/openproxy.db"
+            - name: JWT_SIGN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openproxy-secrets
+                  key: JWT_SIGN_KEY
+                  optional: true
+            # Postgres instead of SQLite: set DB_DRIVER above to "postgres",
+            # uncomment the block below, and remove the data volume and PVC.
+            # - name: DB_HOST
+            #   value: "postgres"
+            # - name: DB_PORT
+            #   value: "5432"
+            # - name: DB_USER
+            #   value: "openproxy"
+            # - name: DB_NAME
+            #   value: "openproxy"
+            # - name: DB_SSL_MODE
+            #   value: "disable"
+            # - name: DB_PASSWORD
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: openproxy-secrets
+            #       key: DB_PASSWORD
+          # Migrations run at startup, so the first probe has to tolerate that.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openproxy-data
+        # readOnlyRootFilesystem is on, so scratch space needs an explicit mount.
+        - name: tmp
+          emptyDir: {}
